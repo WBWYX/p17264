@@ -1,0 +1,14 @@
+build/
+out/
+*.exe
+*.o
+*.log
+table*.txt
+!data/table_best.txt
+hand.bin
+beam*.bin
+!data/beam*.bin
+st.bin
+top.bin
+exact.bin
+merged*.txt
