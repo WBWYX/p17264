@@ -10,12 +10,25 @@ from collections import defaultdict
 
 
 class Sim:
-    """题面语义：时间单位 10 秒。初始 1 空闲基地 / 4 空闲工人 / 6 补给 / 50 矿物。"""
+    """题面语义：时间单位 10 秒。初始 1 空闲基地 / 4 空闲工人 / 6 补给 / 50 矿物。
 
-    def __init__(self):
+    也可用 START 行从一个中间状态（折半口径的束状态）出发，此时把流水线数组
+    展开成绝对时刻的事件表。"""
+
+    def __init__(self, start=None):
         self.t = 0
         self.M, self.S, self.W, self.B = 50, 6, 4, 1
         self.ev = defaultdict(lambda: [0, 0, 0, 0])   # 时刻 -> [工人, 补给, 基地, 矿物]
+        if start is not None:
+            t0, v = start
+            self.t = t0
+            self.M, self.S, self.W, self.B = 2 * v[0], v[1], v[2], v[3]
+            aw, am, as_, ab = v[4:17], v[17:30], v[30:43], v[43:56]
+            for i in range(1, 13):
+                if aw[i]:  self.ev[t0 + i][0] += aw[i]
+                if as_[i]: self.ev[t0 + i][1] += as_[i]
+                if ab[i]:  self.ev[t0 + i][2] += ab[i]
+                if am[i]:  self.ev[t0 + i][3] += 2 * am[i]
 
     def act(self, k, p, q):
         # k 个空闲基地造工人 / p 个工人建补给站 / q 个工人建基地 / 其余工人采矿
@@ -48,6 +61,7 @@ class Sim:
 
 def check(path):
     T = val = None
+    start = None
     acts = []
     for line in open(path):
         line = line.strip()
@@ -57,13 +71,17 @@ def check(path):
             T = int(line.split()[0].split('=')[1])
             val = int(line.split()[1].split('=')[1])
             continue
+        if line.startswith('START'):
+            f = [int(x) for x in line.split()[1:]]
+            start = (f[0], f[1:])
+            continue
         acts.append(tuple(int(x) for x in line.split()))
-    s = Sim()
+    s = Sim(start)
     for a in acts:
         s.act(*a)
     ok = (s.t == T and s.M == val)
-    print("%-22s 步数=%-4d 到达 t=%-4d (=%d 秒)  矿物 2F[t]=%-16d 声明 %-16d %s"
-          % (path, len(acts), s.t, 10 * s.t, s.M, val, "通过" if ok else "*** 不符 ***"))
+    print("%-22s 起点 t=%-4d 步数=%-4d 到达 t=%-4d (=%d 秒)  2F[t]=%-16d 声明 %-16d %s"
+          % (path, start[0] if start else 0, len(acts), s.t, 10 * s.t, s.M, val, "通过" if ok else "*** 不符 ***"))
     return ok
 
 

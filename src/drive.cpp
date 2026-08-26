@@ -200,6 +200,99 @@ static RunRes recedeDrive(const St&e0,int Hz,int RESOLVE){
     }
     R.val=c.x; return R;
 }
+// LP 前瞻取整：每步解 LP 得分数首步动作，对 floor/ceil 组合逐个用「后继状态的 LP 值」打分取最优。
+// 这样每一步的取整决策都由精确的价值函数（LP）裁决，而不是盲目四舍五入。
+static u64 lpLookahead(const St&e0,int Hz,vector<array<u64,3> >*out){
+    St c=e0; vector<array<u64,3> > A(Hz);
+    for(int t=0;t<Hz;t++){
+        int hz=Hz-t;
+        vector<D> sol; D lam=1.0L; if(c.x>2000000ULL) lam=1000000.0L/(D)c.x;
+        { LPS L; L.setState(c,lam); L.build(hz); L.solve(&sol); }
+        D fk=sol[0]/lam, fp=sol[hz]/lam, fq=sol[2*hz]/lam;
+        long long bk=(long long)floorl(fk), bp=(long long)floorl(fp), bq=(long long)floorl(fq);
+        if(bk<0)bk=0; if(bp<0)bp=0; if(bq<0)bq=0;
+        long long bestK=-1,bestP=0,bestQ=0; D bestV=-1;
+        for(int dk=0;dk<=1;dk++) for(int dp=0;dp<=1;dp++) for(int dq=0;dq<=1;dq++){
+            long long k=bk+dk,p=bp+dp,q=bq+dq;
+            if((u64)k>c.b||(u64)k>c.s) continue;
+            if((u64)(p+q)>c.w) continue;
+            if((unsigned long long)(25*k+50*p+200*q)>c.x) continue;
+            St d=step(c,(u64)k,(u64)p,(u64)q);
+            D v;
+            if(hz==1) v=(D)d.x;
+            else { LPS L2; D l2=1.0L; if(d.x>2000000ULL) l2=1000000.0L/(D)d.x;
+                   L2.setState(d,l2); L2.build(hz-1); v=L2.solve(0)/l2; }
+            if(v>bestV){ bestV=v; bestK=k; bestP=p; bestQ=q; }
+        }
+        if(bestK<0){ bestK=bestP=bestQ=0; }   // 兜底：全采矿
+        A[t]={(u64)bestK,(u64)bestP,(u64)bestQ};
+        c=step(c,(u64)bestK,(u64)bestP,(u64)bestQ);
+    }
+    if(out)*out=A;
+    return c.x;
+}
+// LP 束搜索：每步对每个束状态解 LP 取分数首步动作，在其邻域枚举整数候选，
+// 用「后继状态到 T 的 LP 上界」给每个后继打分，保留前 B 个。
+// LP 值是这一尺度上最准的价值函数（整数性缺口 ~1e-7），比任何固定策略族强得多。
+struct BeamEnt{ St s; vector<array<u64,3> > A; };
+static u64 lpBeam(const vector<St>&init,int Hz,int B,int DW,vector<array<u64,3> >*bestA,int*bestI,int verbose){
+    vector<BeamEnt> cur(init.size());
+    for(size_t i=0;i<init.size();i++){ cur[i].s=init[i]; }
+    vector<int> origin(init.size()); for(size_t i=0;i<init.size();i++) origin[i]=i;
+    u64 BEST=0; vector<array<u64,3> > BESTA; int BESTI=-1;
+    for(int t=0;t<Hz;t++){
+        int hz=Hz-t;
+        int n=cur.size();
+        vector<BeamEnt> nx; vector<int> nxo;
+        vector<vector<array<u64,3> > > cand(n);
+        #pragma omp parallel for schedule(dynamic,1)
+        for(int i=0;i<n;i++){
+            const St&c=cur[i].s;
+            vector<D> sol; D lam=1.0L; if(c.x>2000000ULL) lam=1000000.0L/(D)c.x;
+            { LPS L; L.setState(c,lam); L.build(hz); L.solve(&sol); }
+            long long bk=(long long)floorl(sol[0]/lam), bp=(long long)floorl(sol[hz]/lam), bq=(long long)floorl(sol[2*hz]/lam);
+            if(bk<0)bk=0; if(bp<0)bp=0; if(bq<0)bq=0;
+            for(int dk=-DW;dk<=DW+1;dk++) for(int dp=-DW;dp<=DW+1;dp++) for(int dq=-DW;dq<=DW+1;dq++){
+                long long k=bk+dk,p=bp+dp,q=bq+dq;
+                if(k<0||p<0||q<0) continue;
+                if((u64)k>c.b||(u64)k>c.s||(u64)(p+q)>c.w) continue;
+                if((unsigned long long)(25*k+50*p+200*q)>c.x) continue;
+                cand[i].push_back({(u64)k,(u64)p,(u64)q});
+            }
+        }
+        for(int i=0;i<n;i++) for(size_t j=0;j<cand[i].size();j++){
+            BeamEnt e; e.s=step(cur[i].s,cand[i][j][0],cand[i][j][1],cand[i][j][2]);
+            e.A=cur[i].A; e.A.push_back(cand[i][j]);
+            nx.push_back(e); nxo.push_back(origin[i]);
+        }
+        // 去重
+        { vector<int> ord(nx.size()); iota(ord.begin(),ord.end(),0);
+          sort(ord.begin(),ord.end(),[&](int a,int b){return memcmp(&nx[a].s,&nx[b].s,sizeof(St))<0;});
+          vector<BeamEnt> n2; vector<int> o2;
+          for(size_t z=0;z<ord.size();z++){
+            if(!n2.empty()&&memcmp(&n2.back().s,&nx[ord[z]].s,sizeof(St))==0) continue;
+            n2.push_back(nx[ord[z]]); o2.push_back(nxo[ord[z]]); }
+          nx.swap(n2); nxo.swap(o2); }
+        int m=nx.size();
+        vector<D> sc(m);
+        if(hz-1<=0){ for(int i=0;i<m;i++) sc[i]=(D)nx[i].s.x; }
+        else {
+            #pragma omp parallel for schedule(dynamic,1)
+            for(int i=0;i<m;i++){ LPS L; D l=1.0L; if(nx[i].s.x>2000000ULL) l=1000000.0L/(D)nx[i].s.x;
+                L.setState(nx[i].s,l); L.build(hz-1); sc[i]=L.solve(0)/l; }
+        }
+        for(int i=0;i<m;i++) if(nx[i].s.x>BEST){BEST=nx[i].s.x;BESTA=nx[i].A;BESTI=nxo[i];}
+        vector<int> v(m); iota(v.begin(),v.end(),0);
+        int kk=min(B,m);
+        partial_sort(v.begin(),v.begin()+kk,v.end(),[&](int a,int b){return sc[a]>sc[b];});
+        vector<BeamEnt> ns(kk); vector<int> no(kk);
+        for(int i=0;i<kk;i++){ ns[i]=nx[v[i]]; no[i]=nxo[v[i]]; }
+        cur.swap(ns); origin.swap(no);
+        if(verbose&&(t%10==9||t==Hz-1)) fprintf(stderr,"  LP束 t=+%d 候选=%d 束=%d 当前最好*2=%llu\n",t+1,m,(int)cur.size(),2*BEST);
+    }
+    if(bestA)*bestA=BESTA; if(bestI)*bestI=BESTI;
+    return BEST;
+}
 // 三段固定策略族网格（从状态 e 出发，hz 步到 T）
 static u64 gridCash(const St&e,int hz,int CCM,int CAM,int CBM){
     u64 best=e.x;
@@ -233,6 +326,7 @@ int main(int argc,char**argv){
     if(argc>6)GNC=atoi(argv[6]);
     int CCM=argc>7?atoi(argv[7]):20, CAM=argc>8?atoi(argv[8]):26, CBM=argc>9?atoi(argv[9]):12;
     int RESOLVE=argc>10?atoi(argv[10]):1;
+    int BEAMB=argc>11?atoi(argv[11]):16, DELW=argc>12?atoi(argv[12]):0;
     FILE*f=fopen(fn,"rb"); if(!f){printf("no %s\n",fn);return 1;}
     int cnt,t0; if(fread(&cnt,4,1,f)!=1||fread(&t0,4,1,f)!=1)return 1;
     vector<St> all(cnt);
@@ -251,6 +345,9 @@ int main(int argc,char**argv){
     for(int i=0;i<min(K,cnt)&&i<12;i++) printf("   LP#%d *2 = %.1Lf\n",i,2*rk[i].first);
     fflush(stdout);
     int lim=min(K,cnt);
+    if(getenv("TOPOUT")){ FILE*fo=fopen(getenv("TOPOUT"),"wb"); fwrite(&lim,4,1,fo); fwrite(&t0,4,1,fo);
+        for(int i=0;i<lim;i++) fwrite(&all[rk[i].second],sizeof(St),1,fo); fclose(fo);
+        printf("LP 前 %d 个状态 -> %s\n",lim,getenv("TOPOUT")); fflush(stdout); }
     u64 BG=0,BL=0,BR=0; int bgi=-1,bli=-1,bri=-1,BLS=-1,BRS=-1;
     vector<array<u64,3> > BLA,BRA;
     for(int ii=0;ii<lim;ii++){
@@ -275,6 +372,15 @@ int main(int argc,char**argv){
                    ii,2*lv/lam,2*v0,2*v1,okv?"通过":"失败");
             fflush(stdout);
         }
+        if(MODE&16){
+            vector<array<u64,3> > A;
+            u64 v0=lpLookahead(all[rk[ii].second],Hz,&A);
+            u64 v1=repair(all[rk[ii].second],A,Hz,12);
+            int bs; bool okv=verify(all[rk[ii].second],A,v1,bs);
+            if(v1>BR){BR=v1;bri=ii;BRA=A;BRS=rk[ii].second;}
+            printf("  #%d LP前瞻*2=%llu 修复*2=%llu 验证=%s\n",ii,2*v0,2*v1,okv?"通过":"失败");
+            fflush(stdout);
+        }
         if(MODE&8){
             RunRes R=recedeDrive(all[rk[ii].second],Hz,RESOLVE);
             u64 v0=R.val; u64 v1=repair(all[rk[ii].second],R.A,Hz,12);
@@ -284,6 +390,19 @@ int main(int argc,char**argv){
             fflush(stdout);
         }
     }
+    if(MODE&32){
+        vector<St> init; for(int i=0;i<lim;i++) init.push_back(all[rk[i].second]);
+        vector<array<u64,3> > A; int bi2=-1;
+        u64 v=lpBeam(init,Hz,BEAMB,DELW,&A,&bi2,1);
+        int bs; bool okv=verify(all[rk[bi2].second],A,v,bs);
+        printf("LP 束搜索最好 x(%d)*2 = %llu (输入 rank#%d, 验证=%s)\n",T,2*v,bi2,okv?"通过":"失败");
+        if(getenv("CASHOUT")&&bi2>=0){ FILE*fa=fopen(getenv("CASHOUT"),"w");
+            fprintf(fa,"%d %d %d %llu\n",t0,rk[bi2].second,(int)A.size(),v);
+            for(size_t i=0;i<A.size();i++) fprintf(fa,"%llu %llu %llu\n",A[i][0],A[i][1],A[i][2]);
+            fclose(fa); printf("兑现动作 -> %s (起点 t=%d, 输入文件中第 %d 个状态, %d 步)\n",
+                getenv("CASHOUT"),t0,rk[bi2].second,(int)A.size()); }
+    }
+    if(MODE&16) printf("LP 前瞻取整最好 x(%d)*2 = %llu (状态 rank#%d)\n",T,2*BR,bri);
     if(MODE&8) printf("滚动时域 LP 最好 x(%d)*2 = %llu (状态 rank#%d)\n",T,2*BR,bri);
     if(MODE&2) printf("固定策略族网格最好 x(%d)*2 = %llu (状态 rank#%d)\n",T,2*BG,bgi);
     if(MODE&4) printf("LP 驱动取整最好 x(%d)*2 = %llu (状态 rank#%d)\n",T,2*BL,bli);
