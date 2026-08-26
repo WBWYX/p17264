@@ -5,6 +5,8 @@ out/
 *.log
 table*.txt
 !data/table_best.txt
+!data/table_maxreach.txt
+!data/table_prev36.txt
 hand.bin
 beam*.bin
 !data/beam*.bin
@@ -12,3 +14,4 @@ st.bin
 top.bin
 exact.bin
 merged*.txt
+__pycache__/

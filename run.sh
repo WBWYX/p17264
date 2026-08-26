@@ -9,9 +9,11 @@ CXXFLAGS=${CXXFLAGS:--O2 -std=c++17}
 
 build() {
     echo "=== 编译 ==="
-    for f in exact lp dumpst allcash finalcash gen_table; do
+    for f in exact lp dumpst allcash finalcash gen_table rank improve drive; do
         printf '  %-12s' "$f"
-        if $CXX $CXXFLAGS "src/$f.cpp" -o "build/$f" 2> "build/$f.log"; then
+        # improve / drive 用 OpenMP 并行打分与 LP 排序
+        case "$f" in improve|drive|rank) EXTRA="-fopenmp" ;; *) EXTRA="" ;; esac
+        if $CXX $CXXFLAGS $EXTRA "src/$f.cpp" -o "build/$f" 2> "build/$f.log"; then
             echo "ok"
         else
             echo "失败，见 build/$f.log"; head -5 "build/$f.log"; return 1
@@ -107,9 +109,13 @@ PY
 
 check() { python3 src/check.py "${1:-data/table_best.txt}"; }
 
+# 独立复核 data/cert/ 下的可达性证书（与 C++ 完全独立的实现）
+cert() { python3 src/verify_cert.py "$@"; }
+
 case "${1:-check}" in
     build)    build ;;
     selftest) selftest ;;
     check)    check "${2:-data/table_best.txt}" ;;
-    *)        echo "用法: bash run.sh {build|selftest|check [表文件]}"; exit 1 ;;
+    cert)     shift; cert "$@" ;;
+    *)        echo "用法: bash run.sh {build|selftest|check [表文件]|cert [证书...]}"; exit 1 ;;
 esac
