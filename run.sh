@@ -9,10 +9,10 @@ CXXFLAGS=${CXXFLAGS:--O2 -std=c++17}
 
 build() {
     echo "=== 编译 ==="
-    for f in exact lp dumpst allcash finalcash gen_table rank improve drive maxat; do
+    for f in exact lp dumpst allcash finalcash gen_table rank improve drive maxat tablelp; do
         printf '  %-12s' "$f"
         # improve / drive 用 OpenMP 并行打分与 LP 排序
-        case "$f" in improve|drive|rank|maxat) EXTRA="-fopenmp" ;; *) EXTRA="" ;; esac
+        case "$f" in improve|drive|rank|maxat|tablelp) EXTRA="-fopenmp" ;; *) EXTRA="" ;; esac
         if $CXX $CXXFLAGS $EXTRA "src/$f.cpp" -o "build/$f" 2> "build/$f.log"; then
             echo "ok"
         else
