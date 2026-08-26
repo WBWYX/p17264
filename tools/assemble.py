@@ -39,11 +39,13 @@ def main():
     L, U = bounds(n)
 
     lp = {}
-    for f in sorted(glob.glob('out/tab/lp_*.txt')):
+    for f in sorted(glob.glob('out/tab*/lp_*.txt')):
         for line in open(f):
             m = re.match(r'^(\d+) (\d+)$', line.strip())
             if m:
-                lp[int(m.group(1))] = int(m.group(2))
+                t, v = int(m.group(1)), int(m.group(2))
+                if v > lp.get(t, 0):      # 多条参考轨迹的结果逐点取最大
+                    lp[t] = v
     print("读入 LP 束重算结果 %d 项 (t=%d..%d)" % (len(lp), min(lp), max(lp)) if lp else "无 LP 结果")
 
     nUp = nClamp = nL = 0
