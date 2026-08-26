@@ -9,10 +9,10 @@ CXXFLAGS=${CXXFLAGS:--O2 -std=c++17}
 
 build() {
     echo "=== 编译 ==="
-    for f in exact lp dumpst allcash finalcash gen_table rank improve drive; do
+    for f in exact lp dumpst allcash finalcash gen_table rank improve drive maxat; do
         printf '  %-12s' "$f"
         # improve / drive 用 OpenMP 并行打分与 LP 排序
-        case "$f" in improve|drive|rank) EXTRA="-fopenmp" ;; *) EXTRA="" ;; esac
+        case "$f" in improve|drive|rank|maxat) EXTRA="-fopenmp" ;; *) EXTRA="" ;; esac
         if $CXX $CXXFLAGS $EXTRA "src/$f.cpp" -o "build/$f" 2> "build/$f.log"; then
             echo "ok"
         else
@@ -109,13 +109,29 @@ PY
 
 check() { python3 src/check.py "${1:-data/table_best.txt}"; }
 
-# 独立复核 data/cert/ 下的可达性证书（与 C++ 完全独立的实现）
+# 独立复核 data/cert/ 下的动作序列证书（与 C++ 完全独立的实现）
 cert() { python3 src/verify_cert.py "$@"; }
+
+# 39 样例双侧校验（把样例翻译成每个 t 的上下界，逐点检查）
+validate() { python3 src/validate.py "${1:-data/table_best.txt}"; }
+
+# 生成提交程序：内嵌表 + 编译 + 跑两组官方样例
+submit() {
+    python3 tools/embed_table.py "${1:-data/table_best.txt}" src/table_inc.h || return 1
+    $CXX $CXXFLAGS src/submit.cpp -o build/submit || return 1
+    echo "=== 样例 1 ==="; printf '3\n100\n1000\n10000\n' | ./build/submit
+    echo "=== 样例 2 ==="
+    printf '36\n9\n79\n99\n126\n166\n266\n426\n666\n999\n1899\n3399\n5599\n9999\n21999\n45999\n99999\n316227\n999999\n2476413\n2745943\n9999999\n31622776\n99999999\n316227766\n999999999\n3162277660\n9641625025\n10691286350\n99999999999\n316227766017\n999999999999\n9999999999999\n48610229060556\n59770531908338\n66277611238091\n99999999999999\n' \
+        | ./build/submit | tr '\n' ' '; echo
+    echo "期望   2: 0 10 20 30 40 70 110 160 200 300 410 530 640 800 940 1090 1320 1540 1710 1740 1990 2210 2430 2650 2880 3100 3320 3330 3770 3990 4210 4660 4970 5000 5030 5100"
+}
 
 case "${1:-check}" in
     build)    build ;;
     selftest) selftest ;;
     check)    check "${2:-data/table_best.txt}" ;;
     cert)     shift; cert "$@" ;;
-    *)        echo "用法: bash run.sh {build|selftest|check [表文件]|cert [证书...]}"; exit 1 ;;
+    validate) validate "${2:-data/table_best.txt}" ;;
+    submit)   submit "${2:-data/table_best.txt}" ;;
+    *)        echo "用法: bash run.sh {build|selftest|check [表]|validate [表]|cert [证书...]|submit [表]}"; exit 1 ;;
 esac
