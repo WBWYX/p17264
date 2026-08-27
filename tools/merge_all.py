@@ -37,6 +37,7 @@ def collect_auth():
     旧值虽更高但离官方更远，目标是复现官方表而不是求最大）。"""
     auth = {}
     for f in sorted(glob.glob('out/cashA/*.txt')):
+        if os.path.basename(f).startswith('err'): continue
         for line in open(f):
             m = re.match(r'^(\d+) (\d+) ok\s*$', line)
             if m:
@@ -56,6 +57,7 @@ def collect():
     for d in ('out/low', 'out/cash', 'out/pin'):
         if d == 'out/cashA': continue
         for f in sorted(glob.glob(d+'/*.txt')):
+            if os.path.basename(f).startswith('err'): continue
             for line in open(f):
                 m = re.match(r'^(\d+) (\d+) ok\s*$', line)
                 if m:
