@@ -31,6 +31,19 @@ def bounds(n):
             if m-1 < U[t]: U[t] = m-1
     return L, U
 
+def collect_auth():
+    """out/cashA/ 是「标定轨迹 A」的结果：这条轨迹经 496/500/502 三点标定，
+    收敛兑现值与官方值相差 <=8 单位。它是该时刻的权威值（直接采用，不与旧值取最大——
+    旧值虽更高但离官方更远，目标是复现官方表而不是求最大）。"""
+    auth = {}
+    for f in sorted(glob.glob('out/cashA/*.txt')):
+        for line in open(f):
+            m = re.match(r'^(\d+) (\d+) ok\s*$', line)
+            if m:
+                t, v = int(m.group(1)), int(m.group(2))
+                if v > auth.get(t, 0): auth[t] = v
+    return auth
+
 def collect():
     """返回 {t: 2F} 的逐点最大"""
     best = {}
@@ -41,6 +54,7 @@ def collect():
                 t, v = int(m.group(1)), 2*int(m.group(2))
                 if v > best.get(t, 0): best[t] = v
     for d in ('out/low', 'out/cash', 'out/pin'):
+        if d == 'out/cashA': continue
         for f in sorted(glob.glob(d+'/*.txt')):
             for line in open(f):
                 m = re.match(r'^(\d+) (\d+) ok\s*$', line)
@@ -67,13 +81,18 @@ def main():
     F = load_tab(base); n = len(F)
     L, U = bounds(n)
     new = collect()
+    auth = collect_auth()
+    if auth: print("标定轨迹 A 权威值 %d 项 (t=%d..%d)" % (len(auth), min(auth), max(auth)))
     print("重算结果 %d 项 (t=%d..%d)" % (len(new), min(new), max(new)) if new else "无重算结果")
-    nUp = nClamp = nL = 0
-    up = []
+    nUp = nClamp = nL = nAuth = 0
+    up = []; down = []
     for t in range(n):
         v = 2*F[t]
         if t in new and new[t] > v:
             up.append((t, v, new[t])); v = new[t]; nUp += 1
+        if t in auth and auth[t] != v:
+            if auth[t] < v: down.append((t, v, auth[t]))
+            v = auth[t]; nAuth += 1
         if L[t] > v: v = L[t]; nL += 1
         if v > U[t]: v = U[t] - (U[t] & 1); nClamp += 1
         if t in CAP: v = CAP[t]
@@ -83,7 +102,8 @@ def main():
     with open(out, 'w') as fo:
         for i in range(0, n, 8):
             fo.write(','.join('%dULL' % v for v in F[i:i+8]) + (',\n' if i+8 < n else '\n'))
-    print("抬高 %d 项, 下界补 %d 项, 上界削 %d 项 -> %s" % (nUp, nL, nClamp, out))
+    print("抬高 %d 项, 标定替换 %d 项(其中下调 %d), 下界补 %d 项, 上界削 %d 项 -> %s"
+          % (nUp, nAuth, len(down), nL, nClamp, out))
     for t, a, b in up[:40]:
         print("   t=%d  %d -> %d  (%+.3e)" % (t, a, b, (b-a)/a))
     if len(up) > 40: print("   ... 共 %d 项" % len(up))
